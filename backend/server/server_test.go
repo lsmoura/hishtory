@@ -577,3 +577,17 @@ func assertNoLeakedConnections(t *testing.T, db *gorm.DB) {
 		t.Fatalf("expected DB to have not leak connections, actually have %d", numConns)
 	}
 }
+
+func TestWithPanicGuard(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler := withPanicGuard(func(w http.ResponseWriter, r *http.Request) {
+		panic("test")
+	})
+
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 resp code for withPanicGuard")
+	}
+}

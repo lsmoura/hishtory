@@ -254,12 +254,11 @@ func apiQueryHandler(w http.ResponseWriter, r *http.Request) {
 	if isProductionEnvironment() {
 		go func() {
 			span, ctx := tracer.StartSpanFromContext(ctx, "apiQueryHandler.incrementReadCount")
-			err = incrementReadCounts(ctx, deviceId)
+			err := incrementReadCounts(ctx, deviceId)
 			span.Finish(tracer.WithError(err))
 		}()
 	} else {
-		err = incrementReadCounts(ctx, deviceId)
-		if err != nil {
+		if err := incrementReadCounts(ctx, deviceId); err != nil {
 			panic("failed to increment read counts")
 		}
 	}
@@ -802,6 +801,19 @@ func getFunctionName(temp interface{}) string {
 	return strs[len(strs)-1]
 }
 
+func withPanicGuard(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("withPanicGuard: caught panic: %#v\n", err)
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}()
+
+		h.ServeHTTP(w, r)
+	}
+}
+
 func withLogging(h http.HandlerFunc) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		var responseData loggedResponseData
@@ -944,25 +956,27 @@ func main() {
 		go deepCleanDatabase(context.Background())
 	}
 
-	mux.Handle("/api/v1/submit", withLogging(apiSubmitHandler))
-	mux.Handle("/api/v1/get-dump-requests", withLogging(apiGetPendingDumpRequestsHandler))
-	mux.Handle("/api/v1/submit-dump", withLogging(apiSubmitDumpHandler))
-	mux.Handle("/api/v1/query", withLogging(apiQueryHandler))
-	mux.Handle("/api/v1/bootstrap", withLogging(apiBootstrapHandler))
-	mux.Handle("/api/v1/register", withLogging(apiRegisterHandler))
-	mux.Handle("/api/v1/banner", withLogging(apiBannerHandler))
-	mux.Handle("/api/v1/download", withLogging(apiDownloadHandler))
-	mux.Handle("/api/v1/trigger-cron", withLogging(triggerCronHandler))
-	mux.Handle("/api/v1/get-deletion-requests", withLogging(getDeletionRequestsHandler))
-	mux.Handle("/api/v1/add-deletion-request", withLogging(addDeletionRequestHandler))
-	mux.Handle("/api/v1/slsa-status", withLogging(slsaStatusHandler))
-	mux.Handle("/api/v1/feedback", withLogging(feedbackHandler))
-	mux.Handle("/healthcheck", withLogging(healthCheckHandler))
-	mux.Handle("/internal/api/v1/usage-stats", withLogging(usageStatsHandler))
-	mux.Handle("/internal/api/v1/stats", withLogging(statsHandler))
+	middleware := func(fn http.HandlerFunc) http.HandlerFunc { return withPanicGuard(withLogging(fn)) }
+
+	mux.Handle("/api/v1/submit", middleware(apiSubmitHandler))
+	mux.Handle("/api/v1/get-dump-requests", middleware(apiGetPendingDumpRequestsHandler))
+	mux.Handle("/api/v1/submit-dump", middleware(apiSubmitDumpHandler))
+	mux.Handle("/api/v1/query", middleware(apiQueryHandler))
+	mux.Handle("/api/v1/bootstrap", middleware(apiBootstrapHandler))
+	mux.Handle("/api/v1/register", middleware(apiRegisterHandler))
+	mux.Handle("/api/v1/banner", middleware(apiBannerHandler))
+	mux.Handle("/api/v1/download", middleware(apiDownloadHandler))
+	mux.Handle("/api/v1/trigger-cron", middleware(triggerCronHandler))
+	mux.Handle("/api/v1/get-deletion-requests", middleware(getDeletionRequestsHandler))
+	mux.Handle("/api/v1/add-deletion-request", middleware(addDeletionRequestHandler))
+	mux.Handle("/api/v1/slsa-status", middleware(slsaStatusHandler))
+	mux.Handle("/api/v1/feedback", middleware(feedbackHandler))
+	mux.Handle("/healthcheck", middleware(healthCheckHandler))
+	mux.Handle("/internal/api/v1/usage-stats", middleware(usageStatsHandler))
+	mux.Handle("/internal/api/v1/stats", middleware(statsHandler))
 	if isTestEnvironment() {
-		mux.Handle("/api/v1/wipe-db-entries", withLogging(wipeDbEntriesHandler))
-		mux.Handle("/api/v1/get-num-connections", withLogging(getNumConnectionsHandler))
+		mux.Handle("/api/v1/wipe-db-entries", middleware(wipeDbEntriesHandler))
+		mux.Handle("/api/v1/get-num-connections", middleware(getNumConnectionsHandler))
 	}
 	fmt.Println("Listening on localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))

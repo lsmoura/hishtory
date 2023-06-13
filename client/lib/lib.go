@@ -378,14 +378,13 @@ func Setup(userSecret string, isOffline bool) error {
 	if config.IsOffline {
 		return nil
 	}
-	_, err = ApiGet("/api/v1/register?user_id=" + data.UserId(userSecret) + "&device_id=" + config.DeviceId)
-	if err != nil {
-		return fmt.Errorf("failed to register device with backend: %v", err)
+	if _, err := ApiGet("/api/v1/register?user_id=" + data.UserId(userSecret) + "&device_id=" + config.DeviceId); err != nil {
+		return fmt.Errorf("failed to register device with backend: %w", err)
 	}
 
 	respBody, err := ApiGet("/api/v1/bootstrap?user_id=" + data.UserId(userSecret) + "&device_id=" + config.DeviceId)
 	if err != nil {
-		return fmt.Errorf("failed to bootstrap device from the backend: %v", err)
+		return fmt.Errorf("failed to bootstrap device from the backend: %w", err)
 	}
 	var retrievedEntries []*shared.EncHistoryEntry
 	err = json.Unmarshal(respBody, &retrievedEntries)
@@ -395,7 +394,7 @@ func Setup(userSecret string, isOffline bool) error {
 	for _, entry := range retrievedEntries {
 		decEntry, err := data.DecryptHistoryEntry(userSecret, *entry)
 		if err != nil {
-			return fmt.Errorf("failed to decrypt history entry from server: %v", err)
+			return fmt.Errorf("failed to decrypt history entry from server: %w", err)
 		}
 		AddToDbIfNew(db, decEntry)
 	}
